@@ -1,0 +1,6 @@
+<resources>
+    <style name="Theme.IMusic" parent="Theme.Material3.DayNight.NoActionBar" />
+    <style name="Theme.IMusic.Splash" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="android:windowSplashScreenBackground">#0D0D0D</item>
+    </style>
+</resources>
