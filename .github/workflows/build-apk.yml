@@ -1,0 +1,169 @@
+name: 🎵 iMusic - Build Android APK
+
+on:
+  push:
+    branches: [ main, master, develop ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: 'Build type (debug/release)'
+        required: false
+        default: 'debug'
+
+jobs:
+  build:
+    name: Build iMusic APK
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: ☕ Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+          cache: gradle
+
+      - name: 📱 Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 🔧 Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: wrapper
+          cache-read-only: false
+
+      - name: 📦 Generate Gradle Wrapper (if missing)
+        run: |
+          if [ ! -f "gradle/wrapper/gradle-wrapper.jar" ]; then
+            echo "Downloading gradle-wrapper.jar..."
+            mkdir -p gradle/wrapper
+            curl -L "https://github.com/gradle/gradle/raw/v8.6.0/gradle/wrapper/gradle-wrapper.jar" \
+              -o gradle/wrapper/gradle-wrapper.jar 2>/dev/null || \
+            wget -q "https://raw.githubusercontent.com/gradle/gradle/v8.6.0/gradle/wrapper/gradle-wrapper.jar" \
+              -O gradle/wrapper/gradle-wrapper.jar 2>/dev/null || \
+            gradle wrapper --gradle-version 8.6 2>/dev/null || true
+          fi
+          ls -la gradle/wrapper/
+
+      - name: 🔑 Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: 🔍 Validate Gradle files
+        run: |
+          echo "=== Project structure ==="
+          ls -la
+          echo "=== App build.gradle.kts ==="
+          cat app/build.gradle.kts | head -20
+          echo "=== Gradle wrapper properties ==="
+          cat gradle/wrapper/gradle-wrapper.properties
+
+      - name: 📋 Cache Gradle dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+          key: gradle-${{ runner.os }}-${{ hashFiles('**/*.gradle.kts', '**/libs.versions.toml', '**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-${{ runner.os }}-
+
+      - name: 🔨 Build Debug APK
+        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        env:
+          GRADLE_OPTS: "-Xmx4g -Dkotlin.incremental=false"
+
+      - name: ✅ Verify APK was built
+        run: |
+          echo "=== Checking APK output ==="
+          find app/build/outputs -name "*.apk" -type f
+          ls -lh app/build/outputs/apk/debug/ || echo "APK directory not found"
+
+      - name: 📤 Upload Debug APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: iMusic-Debug-APK-${{ github.run_number }}
+          path: app/build/outputs/apk/debug/*.apk
+          retention-days: 90
+          if-no-files-found: error
+
+      - name: 🎉 Build Success Summary
+        run: |
+          echo "✅ iMusic APK built successfully!"
+          echo "📱 Build: #${{ github.run_number }}"
+          echo "🌿 Branch: ${{ github.ref_name }}"
+          echo "🔀 Commit: ${{ github.sha }}"
+          APK_SIZE=$(du -sh app/build/outputs/apk/debug/*.apk | cut -f1)
+          echo "📦 APK Size: $APK_SIZE"
+
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    
+    steps:
+      - name: 📥 Checkout repository
+        uses: actions/checkout@v4
+
+      - name: 📥 Download APK artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: iMusic-Debug-APK-${{ github.run_number }}
+          path: ./apk-output/
+
+      - name: 📋 Get release info
+        id: release_info
+        run: |
+          echo "date=$(date +'%Y-%m-%d')" >> $GITHUB_OUTPUT
+          echo "short_sha=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+          ls -lh ./apk-output/
+
+      - name: 🚀 Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: "🎵 iMusic v1.0.${{ github.run_number }} (${{ steps.release_info.outputs.date }})"
+          body: |
+            ## 🎵 iMusic - Professional Music Streaming App
+            
+            **Build:** #${{ github.run_number }} | **Date:** ${{ steps.release_info.outputs.date }} | **Commit:** `${{ steps.release_info.outputs.short_sha }}`
+            
+            ### ✨ Features
+            - 🎵 Online streaming via Jamendo API (600K+ free songs)
+            - 📥 Offline download & playback
+            - 🔍 Real-time search (tracks, artists, albums)
+            - 📋 Playlist management (create, edit, delete)
+            - ❤️ Favorites & liked songs
+            - 🎨 Dynamic album art themes
+            - 🎛️ Equalizer with presets
+            - 💤 Sleep timer
+            - 🔀 Shuffle & repeat modes
+            - 📱 Lock screen & notification controls
+            - 🌙 Dark/Light theme
+            - 🎤 Lyrics display (LrcLib API)
+            - 📊 Recently played history
+            - 🎙️ Artist & Album pages
+            - 🎶 Genre browsing
+            - ⚙️ Full settings screen
+            
+            ### 📥 Download
+            Download the APK below and install on your Android device (Android 7.0+)
+            > Enable "Install from Unknown Sources" in Settings → Security
+            
+            ### 👨‍💻 Developer
+            **Md Salman Biswas** | [GitHub](https://github.com/salman-dev-app/salman-dev-app)
+            
+            ### 📜 License
+            Open Source - MIT License | Music: Creative Commons via Jamendo
+          files: ./apk-output/*.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
